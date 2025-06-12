@@ -1,0 +1,114 @@
+# DRIVE360 Assessment System - Data Flow Documentation
+
+## Overview
+This document outlines how the DRIVE360 system fetches and displays session data and assessment cards, including the SQL database structure and data flow.
+
+## Data Flow Architecture
+
+### 1. Session Data Fetching
+When a user selects a vehicle, the application fetches available session options:
+
+- **Client Side**: `fetchSessionOptions(userPK, vehicleName)` in MainContent.js
+- **Server Side**: `/api/session-options` endpoint in server.js
+- **SQL Query**: 
+  ```sql
+  SELECT MAX(r.AttemptNumber) as maxSession
+  FROM eframe2.results r
+  JOIN eframe2.vehicletype vt ON r.VehicleID = vt.VehicleID
+  JOIN eframe2.users u ON r.UserPK = u.UserPK
+  WHERE r.UserPK = ? AND r.VehicleID = ? AND vt.LocationID = u.LocationID
+  ```
+
+### 2. Assessment Cards Data Fetching
+When a session is selected, the application fetches assessment data:
+
+- **Client Side**: `fetchVehicleAssessmentData(userPK, vehicleName, sessionNumber)` in MainContent.js
+- **Server Side**: `/api/vehicle-assessment-data` endpoint in server.js
+- **SQL Query**:
+  ```sql
+  SELECT r.AssessmentNumber, 
+         r.AttemptNumber, 
+         COUNT(DISTINCT CASE WHEN r.ViolationQuantity > 0 THEN r.ViolationID END) AS UniqueViolationCount
+  FROM results r
+  JOIN users u ON r.UserPK = u.UserPK
+  JOIN user_vehicle uv ON r.UserPK = uv.UserPK AND r.VehicleID = uv.VehicleID
+  JOIN vehicletype vt ON r.VehicleID = vt.VehicleID
+  WHERE u.UserPK = ? 
+    AND r.VehicleID = ?
+    AND u.LocationID = vt.LocationID
+    AND r.AttemptNumber = ?
+  GROUP BY r.AssessmentNumber, r.AttemptNumber
+  ```
+
+### 3. Violation Details Fetching
+When an assessment card is selected, the application fetches violation details:
+
+- **Client Side**: `fetchViolationDetails(userPK, assessmentNumber, attemptNumber, vehicleID)` in MainContent.js
+- **Server Side**: `/api/violation-details` endpoint in server.js
+- **SQL Query**:
+  ```sql
+  SELECT b.ViolationScreenName, a.ViolationQuantity, a.TestTaken 
+  FROM eframe2.results a, eframe2.violationmaster b 
+  WHERE a.UserPK = ?
+  AND a.AssessmentNumber = ? 
+  AND a.AttemptNumber = ?
+  AND a.VehicleID = ?
+  AND a.ViolationID = b.ViolationID
+  ```
+
+## Database Tables
+
+### Main Tables:
+
+1. **users**
+   - Stores user information
+   - Key fields: UserPK, EmployeeName, EmployeeID, Password, LocationID, GroupID, photo
+
+2. **vehicletype**
+   - Stores vehicle type information
+   - Key fields: VehicleID, VehicleName, ScreenName, AvailableAssessments, MaximumViolation, LocationID
+
+3. **results**
+   - Stores assessment results and violations
+   - Key fields: UserPK, VehicleID, AssessmentNumber, AttemptNumber, ViolationID, ViolationQuantity, TestTaken
+
+4. **user_vehicle**
+   - Links users to vehicles they can operate
+   - Key fields: UserPK, VehicleID, Remarks
+
+5. **violationmaster**
+   - Stores violation definitions
+   - Key fields: ViolationID, ViolationScreenName
+
+6. **userlocation**
+   - Stores location information
+   - Key fields: LocationID, LocationName
+
+7. **user_assessment_details_final**
+   - Stores final assessment details
+   - Key fields: UserPK, EmployeeName, VehicleID, LocationID, AttemptNumber, AverageScore, DriverScoreCategory, Status, TestTaken
+
+### Views:
+
+1. **vehiclewiseleaderboard**
+   - A view that generates the leaderboard
+   - Fields: VehicleID, VehicleName, LocationID, UserPK, EmployeeName, AverageScore, Rankings
+
+## Data Flow Diagram
+
+User selects vehicle → Session options fetched → User selects session → Assessment data fetched → Displays assessment cards → User selects assessment card → Violation details fetched → Displays violation data
+
+## UI Components
+
+1. **Session Dropdown**
+   - Shows available sessions (Session 1, Session 2, etc.)
+   - Data source: sessionOptions state populated from fetchSessionOptions API
+
+2. **Assessment Cards**
+   - Shows assessment number, score percentage, and star rating
+   - Data source: attempts state populated from fetchVehicleAssessmentData API
+   - Implementation: AttemptCard component with CircularProgressChart
+
+3. **Assessment Breakdown Table**
+   - Shows violation details with status indicators
+   - Data source: violationDetails state populated from fetchViolationDetails API 
